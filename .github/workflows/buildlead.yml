@@ -20,6 +20,15 @@ on:
           - Turrit
           - Vartagram
 
+      tweak:
+        description: "Tweak"
+        default: "Lead"
+        required: true
+        type: choice
+        options:
+          - Lead
+          - TGExtra
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -50,7 +59,7 @@ jobs:
       - name: Hide Sensitive Inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
         with:
-          exclude_inputs: display_name
+          exclude_inputs: display_name,tweak
 
       - name: Download and Validate IPA
         run: |
@@ -73,10 +82,27 @@ jobs:
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
           rm -rf tgextracted
 
-      - name: Get Lead Version
+      - name: Get Tweak Version
         run: |
-          DEB_FILE=$(ls resources/com.w3ltyyy.lead_*.deb)
-          echo "LEAD_VERSION=$(echo $DEB_FILE | sed 's/.*lead_\([^_]*\).*/\1/')" >> $GITHUB_ENV
+          if [ "${{ inputs.tweak }}" = "Lead" ]; then
+            DEB_FILE=$(ls resources/com.w3ltyyy.lead_*.deb)
+            VERSION=$(echo "$DEB_FILE" | sed 's/.*lead_\([^_]*\).*/\1/')
+          elif [ "${{ inputs.tweak }}" = "TGExtra" ]; then
+            DEB_FILE=$(ls resources/com.choco.tgextra_*.deb)
+            VERSION=$(echo "$DEB_FILE" | sed -E 's/.*_([0-9]+\.[0-9]+\.[0-9]+)_iphoneos.*/\1/')
+          else
+            echo "::error::Unknown tweak: ${{ inputs.tweak }}"
+            exit 1
+          fi
+
+          if [[ -z "$DEB_FILE" || ! -f "$DEB_FILE" ]]; then
+            echo "::error::Tweak deb not found for ${{ inputs.tweak }}"
+            exit 1
+          fi
+
+          echo "TWEAK_DEB=$DEB_FILE" >> $GITHUB_ENV
+          echo "TWEAK_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Selected tweak: ${{ inputs.tweak }} → $DEB_FILE (v$VERSION)"
 
       - name: Install Dependencies
         run: brew install make ldid
@@ -122,23 +148,29 @@ jobs:
       - name: Inject Into IPA
         run: |
           shopt -s nullglob
-          tweaks=("zxPluginsInject.dylib")
-          for file in resources/*.{deb,dylib}; do
+          tweaks=("zxPluginsInject.dylib" "${{ env.TWEAK_DEB }}")
+
+          # Always include common dylibs (except SwiftgramCrack)
+          for file in resources/*.dylib; do
             if [[ "$file" != "resources/SwiftgramCrack.dylib" ]]; then
               tweaks+=("$file")
             fi
           done
+
+          # SwiftgramCrack only for Swiftgram
           if [ "${{ steps.resolve.outputs.bundle_id }}" = "app.swiftgram.ios" ]; then
             tweaks+=("resources/SwiftgramCrack.dylib")
           fi
+
           for t in "${tweaks[@]}"; do
             if [[ ! -f "$t" ]]; then
               echo "::error::Tweak file $t not found!"
               exit 1
             fi
           done
+
           cyan -i telegram.ipa \
-            -o "${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.LEAD_VERSION }}.ipa" \
+            -o "${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.TWEAK_VERSION }}.ipa" \
             -f "${tweaks[@]}" \
             -n "${{ inputs.display_name }}" \
             -b "${{ steps.resolve.outputs.bundle_id }}"
@@ -153,9 +185,9 @@ jobs:
           done
           gh release create "tg-ipa${i}" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.LEAD_VERSION }}" \
+            --title "${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.TWEAK_VERSION }}" \
             --draft \
-            ${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.LEAD_VERSION }}.ipa
+            ${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.TWEAK_VERSION }}.ipa
 
       - name: Job Summary - Build Complete
         run: echo -e '### 🛠️ Build IPA Complete!' >> $GITHUB_STEP_SUMMARY
