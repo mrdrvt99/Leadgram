@@ -1,4 +1,4 @@
-# Lead 1.4.4
+# Lead 1.4.4 + TGExtra 1.7.8
 A simple Telegram iOS Tweak.
 
 To Open Tweak menu : Open settings and scroll down to "Ask a Question" and hold press to pull up the settings.
@@ -16,4 +16,5 @@ To Open Tweak menu : Open settings and scroll down to "Ask a Question" and hold 
 - Anti-Edit — view the original text even after it’s been edited.
 
 
-Tweak by [@Lead](https://t.me/Leadgramm) and Changelogs can be found inside the channel.
+Tweak by [@Lead](https://t.me/Leadgramm) and [@TGExtra](https://t.me/ultimatePoison)
+
