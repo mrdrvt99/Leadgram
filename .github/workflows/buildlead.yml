@@ -19,6 +19,7 @@ on:
           - Swiftgram
           - Turrit
           - Vartagram
+          - Nagram
 
       tweak:
         description: "Tweak"
@@ -28,6 +29,7 @@ on:
         options:
           - Lead
           - TGExtra
+          - iQTele
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -53,6 +55,7 @@ jobs:
             "Swiftgram")  BUNDLE_ID="app.swiftgram.ios" ;;
             "Turrit")     BUNDLE_ID="com.seastar.turrit" ;;
             "Vartagram")  BUNDLE_ID="org.cpartisans.vartagram" ;;
+            "Nagram")     BUNDLE_ID="xyz.nextalone.nagram" ;;
           esac
           echo "bundle_id=$BUNDLE_ID" >> $GITHUB_OUTPUT
 
@@ -90,13 +93,16 @@ jobs:
           elif [ "${{ inputs.tweak }}" = "TGExtra" ]; then
             DEB_FILE=$(ls resources/com.choco.tgextra_*.deb)
             VERSION=$(echo "$DEB_FILE" | sed -E 's/.*_([0-9]+\.[0-9]+\.[0-9]+)_iphoneos.*/\1/')
+          elif [ "${{ inputs.tweak }}" = "iQTele" ]; then
+            DEB_FILE=$(ls resources/iQTele_*_iphoneos-arm64.deb)
+            VERSION=$(echo "$DEB_FILE" | sed -E 's/.*iQTele_([^_]+)_iphoneos.*/\1/')
           else
             echo "::error::Unknown tweak: ${{ inputs.tweak }}"
             exit 1
           fi
 
           if [[ -z "$DEB_FILE" || ! -f "$DEB_FILE" ]]; then
-            echo "::error::Tweak deb not found for ${{ inputs.tweak }}"
+            echo "::error::Tweak file not found for ${{ inputs.tweak }}"
             exit 1
           fi
 
@@ -142,33 +148,27 @@ jobs:
       - name: Clone and Build zxPluginsInject
         run: |
           git clone --quiet --depth=1 --recurse-submodules https://github.com/royerlraph79/zxPluginsInject.git
-          cd zxPluginsInject && make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:18.6:15.0
+          cd zxPluginsInject && make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:18.6:14.0
           mv .theos/obj/*.dylib ${{ github.workspace }}/zxPluginsInject.dylib
 
       - name: Inject Into IPA
         run: |
           shopt -s nullglob
           tweaks=("zxPluginsInject.dylib" "${{ env.TWEAK_DEB }}")
-
-          # Always include common dylibs (except SwiftgramCrack)
           for file in resources/*.dylib; do
             if [[ "$file" != "resources/SwiftgramCrack.dylib" ]]; then
               tweaks+=("$file")
             fi
           done
-
-          # SwiftgramCrack only for Swiftgram
           if [ "${{ steps.resolve.outputs.bundle_id }}" = "app.swiftgram.ios" ]; then
             tweaks+=("resources/SwiftgramCrack.dylib")
           fi
-
           for t in "${tweaks[@]}"; do
             if [[ ! -f "$t" ]]; then
               echo "::error::Tweak file $t not found!"
               exit 1
             fi
           done
-
           cyan -i telegram.ipa \
             -o "${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.TWEAK_VERSION }}.ipa" \
             -f "${tweaks[@]}" \
