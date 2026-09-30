@@ -1,20 +1,13 @@
-# Lead 1.4.4 + TGExtra 1.7.8
+# Lead 1.4.4 + TGExtra 1.7.8 + iQTele 1.4
 A simple Telegram iOS Tweak.
+> [!NOTE]
+> - To Open Tweak menu : Open settings and scroll down to "Ask a Question" and hold press to pull up the settings.
+> - for iQTele Tap the iQ logo at the top right-hand corner
 
-To Open Tweak menu : Open settings and scroll down to "Ask a Question" and hold press to pull up the settings.
+Credits:
 
-### NOTE: Infinite Updating... bug is fixed in 12.7 versions. disable save restricted media to fix it in older versions.
-### Lead Features
-- Disable Ads
-- Ghost Mode
-- No Read Receipt for messages and Stories
-- Allow saving Protected Content
-- Save Restricted Media — save media even where it’s restricted.
-- Anti-Screenshot — take screenshots without notifications.
-- Anti-Self-Destruct — disappearing photos and videos no longer disappear.
-- Anti-Revoke — deleted messages no longer disappear for you.
-- Anti-Edit — view the original text even after it’s been edited.
+[@Lead](https://t.me/Leadgramm) 
 
+[@TGExtra](https://t.me/ultimatePoison)
 
-Tweak by [@Lead](https://t.me/Leadgramm) and [@TGExtra](https://t.me/ultimatePoison)
-
+[@iQTele](https://t.me/iQTweak)
