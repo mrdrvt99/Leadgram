@@ -1,4 +1,4 @@
-# Lead 2.0 + TGExtra 1.7.10 + iQTele 1.5
+# Lead 2.0.2 + TGExtra 1.7.10 + iQTele 1.5
 A simple Telegram iOS Tweak.
 > [!NOTE]
 > - To Open Tweak menu : Open settings and scroll down to "Ask a Question" and hold press to pull up the settings.
