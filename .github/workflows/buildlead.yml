@@ -28,11 +28,6 @@ on:
           - Lead
           - TGExtra
           - iQTele
-      include_swiftgramcrack:
-        description: "Include SwiftgramCrack (13.1.2+ incompatible)"
-        default: false
-        required: false
-        type: boolean
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -131,7 +126,14 @@ jobs:
           if ! command -v cyan &> /dev/null; then
             pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
           fi
+      - name: Cache zxPluginsInject
+        id: zx_cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/zxPluginsInject.dylib
+          key: zxPluginsInject-${{ runner.os }}-v1
       - name: Clone and Build zxPluginsInject
+        if: steps.zx_cache.outputs.cache-hit != 'true'
         run: |
           git clone --quiet --depth=1 --recurse-submodules https://github.com/royerlraph79/zxPluginsInject.git
           cd zxPluginsInject && make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:18.6:14.0
@@ -141,12 +143,12 @@ jobs:
           shopt -s nullglob
           tweaks=("zxPluginsInject.dylib" "${{ env.TWEAK_DEB }}")
           for file in resources/*.dylib; do
-            if [[ "$file" != "resources/SwiftgramCrack.dylib" ]]; then
+            if [[ "$file" != "resources/SwiftgramPro.dylib" ]]; then
               tweaks+=("$file")
             fi
           done
-          if [ "${{ inputs.include_swiftgramcrack }}" = "true" ]; then
-            tweaks+=("resources/SwiftgramCrack.dylib")
+          if [ "${{ inputs.display_name }}" = "Swiftgram" ]; then
+            tweaks+=("resources/SwiftgramPro.dylib")
           fi
           for t in "${tweaks[@]}"; do
             if [[ ! -f "$t" ]]; then
