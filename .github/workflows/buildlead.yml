@@ -34,7 +34,7 @@ concurrency:
 jobs:
   build:
     name: Build IPA
-    runs-on: macos-latest
+    runs-on: xcode-27
     permissions:
       contents: write
     steps:
