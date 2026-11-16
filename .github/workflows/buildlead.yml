@@ -1,4 +1,5 @@
 name: Build IPA
+
 on:
   workflow_dispatch:
     inputs:
@@ -28,126 +29,197 @@ on:
           - Lead
           - TGExtra
           - iQTele
+
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   build:
     name: Build IPA
     runs-on: xcode-27
+    timeout-minutes: 60
     permissions:
       contents: write
+    env:
+      SDK_VERSION: '18.6'
+      ZXPI_MIN_IOS: '14.0'
+
     steps:
+      - name: Hide Sensitive Inputs
+        uses: levibostian/action-hide-sensitive-inputs@v1
+        with:
+          exclude_inputs: display_name,tweak
+
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Resolve Bundle ID
         id: resolve
+        env:
+          DISPLAY_NAME: ${{ inputs.display_name }}
         run: |
-          case "${{ inputs.display_name }}" in
+          case "$DISPLAY_NAME" in
             "Telegram")   BUNDLE_ID="ph.telegra.Telegraph" ;;
             "Nicegram")   BUNDLE_ID="app.nicegram" ;;
             "Swiftgram")  BUNDLE_ID="app.swiftgram.ios" ;;
             "Turrit")     BUNDLE_ID="com.seastar.turrit" ;;
             "Vartagram")  BUNDLE_ID="org.cpartisans.vartagram" ;;
             "Nagram")     BUNDLE_ID="xyz.nextalone.nagram" ;;
+            *)
+              echo "::error::Unknown app name: $DISPLAY_NAME"
+              exit 1
+              ;;
           esac
-          echo "bundle_id=$BUNDLE_ID" >> $GITHUB_OUTPUT
-      - name: Hide Sensitive Inputs
-        uses: levibostian/action-hide-sensitive-inputs@v1
-        with:
-          exclude_inputs: display_name,tweak
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+
       - name: Download and Validate IPA
+        env:
+          IPA_URL: ${{ inputs.ipa_url }}
         run: |
-          wget "${{ inputs.ipa_url }}" --quiet --no-verbose -O telegram.ipa
+          download() {
+            rm -f "$2"
+            if wget --quiet --no-verbose --tries=3 --waitretry=2 -O "$2" "$1"; then
+              return 0
+            fi
+            echo "::warning::wget failed for $2, retrying with curl"
+            rm -f "$2"
+            curl --fail --location --silent --show-error --retry 3 --retry-delay 2 -o "$2" "$1"
+          }
+          download "$IPA_URL" telegram.ipa
           file_type=$(file --mime-type -b telegram.ipa)
           if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
             echo "::error::Validation failed: The downloaded file is not a valid IPA. Detected type: $file_type."
             exit 1
           fi
+
       - name: Get App Version
         run: |
-          unzip -q telegram.ipa -d tgextracted
-          APP_PAYLOAD=$(find tgextracted/Payload/ -maxdepth 1 -mindepth 1 -type d | head -n 1)
-          if [[ -z "$APP_PAYLOAD" ]]; then
+          # Only the top-level app's Info.plist is read (not the whole IPA, not nested apps).
+          plist_entry="$(unzip -Z1 telegram.ipa | grep -m1 -E '^Payload/[^/]+\.app/Info\.plist$' || true)"
+          if [[ -z "$plist_entry" ]]; then
             echo "::error::Could not find app bundle in Payload/"
             exit 1
           fi
-          VERSION=$(plutil -extract CFBundleShortVersionString raw -o - "$APP_PAYLOAD/Info.plist")
-          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
-          rm -rf tgextracted
+          plist_dir="$RUNNER_TEMP/tgplist"
+          mkdir -p "$plist_dir"
+          unzip -q -j -o telegram.ipa "$plist_entry" -d "$plist_dir"
+          version="$(plutil -extract CFBundleShortVersionString raw -o - "$plist_dir/Info.plist" | tr -d '\r\n' | tr -c 'A-Za-z0-9._+~-' '_')"
+          rm -rf "$plist_dir"
+          if [[ -z "$version" ]]; then
+            echo "::error::Could not read CFBundleShortVersionString from the IPA's Info.plist"
+            exit 1
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+
       - name: Get Tweak Version
+        env:
+          TWEAK: ${{ inputs.tweak }}
         run: |
-          if [ "${{ inputs.tweak }}" = "Lead" ]; then
-            DEB_FILE=$(ls resources/com.w3ltyyy.lead_*.deb)
-            VERSION=$(echo "$DEB_FILE" | sed 's/.*lead_\([^_]*\).*/\1/')
-          elif [ "${{ inputs.tweak }}" = "TGExtra" ]; then
-            DEB_FILE=$(ls resources/com.choco.tgextra_*.deb)
-            VERSION=$(echo "$DEB_FILE" | sed -E 's/.*_([0-9]+\.[0-9]+\.[0-9]+)_iphoneos.*/\1/')
-          elif [ "${{ inputs.tweak }}" = "iQTele" ]; then
-            DEB_FILE=$(ls resources/iQTele_*_rootless.deb)
-            VERSION=$(echo "$DEB_FILE" | sed -E 's/.*iQTele_([^_]+)_rootless.*/\1/')
-          else
-            echo "::error::Unknown tweak: ${{ inputs.tweak }}"
+          shopt -s nullglob
+          case "$TWEAK" in
+            "Lead")    files=(resources/com.w3ltyyy.lead_*.deb) ;;
+            "TGExtra") files=(resources/com.choco.tgextra_*.deb) ;;
+            "iQTele")  files=(resources/iQTele_*_rootless.deb) ;;
+            *)
+              echo "::error::Unknown tweak: $TWEAK"
+              exit 1
+              ;;
+          esac
+          if [[ ${#files[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one tweak file for $TWEAK in resources/, found ${#files[@]}"
             exit 1
           fi
-          if [[ -z "$DEB_FILE" || ! -f "$DEB_FILE" ]]; then
-            echo "::error::Tweak file not found for ${{ inputs.tweak }}"
+          DEB_FILE="${files[0]}"
+          case "$TWEAK" in
+            "Lead")    VERSION=$(echo "$DEB_FILE" | sed 's/.*lead_\([^_]*\).*/\1/') ;;
+            "TGExtra") VERSION=$(echo "$DEB_FILE" | sed -E 's/.*_([0-9]+\.[0-9]+\.[0-9]+)_iphoneos.*/\1/') ;;
+            "iQTele")  VERSION=$(echo "$DEB_FILE" | sed -E 's/.*iQTele_([^_]+)_rootless.*/\1/') ;;
+          esac
+          # If sed did not match, VERSION is still the whole path.
+          if [[ -z "$VERSION" || "$VERSION" == *"/"* ]]; then
+            echo "::error::Could not read the version from $DEB_FILE"
             exit 1
           fi
-          echo "TWEAK_DEB=$DEB_FILE" >> $GITHUB_ENV
-          echo "TWEAK_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Selected tweak: ${{ inputs.tweak }} → $DEB_FILE (v$VERSION)"
-      - name: Install Dependencies
-        run: brew install make ldid
-      - name: Set PATH Environment Variables
-        run: |
-          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
-          echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
-      - name: Cache Theos
-        id: theos_cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/theos
-          key: theos-${{ runner.os }}
-      - name: Install Theos
-        if: steps.theos_cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --quiet --recursive https://github.com/theos/theos.git $THEOS
-      - name: Download iOS SDK
-        if: steps.theos_cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --quiet --depth=1 -n --filter=tree:0 https://github.com/Tonwalter888/iOS-SDKs.git
-          cd iOS-SDKs
-          git sparse-checkout set --no-cone iPhoneOS18.6.sdk
-          git checkout
-          mv *.sdk $THEOS/sdks
-      - name: Install cyan
-        run: |
-          if ! command -v cyan &> /dev/null; then
-            pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
-          fi
+          VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._+~-' '_')"
+          echo "TWEAK_DEB=$DEB_FILE" >> "$GITHUB_ENV"
+          echo "TWEAK_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Selected tweak: $TWEAK → $DEB_FILE (v$VERSION)"
+
       - name: Cache zxPluginsInject
         id: zx_cache
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/zxPluginsInject.dylib
           key: zxPluginsInject-${{ runner.os }}-v1
+
+      - name: Install Dependencies
+        if: steps.zx_cache.outputs.cache-hit != 'true'
+        run: brew install make ldid
+
+      - name: Set PATH Environment Variables
+        if: steps.zx_cache.outputs.cache-hit != 'true'
+        run: |
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "THEOS=${{ github.workspace }}/theos" >> "$GITHUB_ENV"
+
+      - name: Cache Theos
+        if: steps.zx_cache.outputs.cache-hit != 'true'
+        id: theos_cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/theos
+          key: theos-${{ runner.os }}
+
+      - name: Install Theos
+        if: steps.zx_cache.outputs.cache-hit != 'true' && steps.theos_cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet --recursive https://github.com/theos/theos.git "$THEOS"
+
+      - name: Download iOS SDK
+        if: steps.zx_cache.outputs.cache-hit != 'true' && steps.theos_cache.outputs.cache-hit != 'true'
+        run: |
+          sdk_repo="$RUNNER_TEMP/iOS-SDKs"
+          git clone --quiet --depth=1 -n --filter=tree:0 https://github.com/Tonwalter888/iOS-SDKs.git "$sdk_repo"
+          cd "$sdk_repo"
+          git sparse-checkout set --no-cone "iPhoneOS${SDK_VERSION}.sdk"
+          git checkout
+          mkdir -p "$THEOS/sdks"
+          mv "iPhoneOS${SDK_VERSION}.sdk" "$THEOS/sdks/"
+          test -d "$THEOS/sdks/iPhoneOS${SDK_VERSION}.sdk"
+          rm -rf "$sdk_repo"
+
       - name: Clone and Build zxPluginsInject
         if: steps.zx_cache.outputs.cache-hit != 'true'
         run: |
           git clone --quiet --depth=1 --recurse-submodules https://github.com/royerlraph79/zxPluginsInject.git
-          cd zxPluginsInject && make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:18.6:14.0
+          cd zxPluginsInject && make FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET=iphone:clang:${SDK_VERSION}:${ZXPI_MIN_IOS}
           mv .theos/obj/*.dylib ${{ github.workspace }}/zxPluginsInject.dylib
+
+      - name: Install cyan
+        run: |
+          if ! command -v cyan &> /dev/null; then
+            pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+          fi
+
       - name: Inject Into IPA
+        env:
+          DISPLAY_NAME: ${{ inputs.display_name }}
+          BUNDLE_ID: ${{ steps.resolve.outputs.bundle_id }}
         run: |
           shopt -s nullglob
-          tweaks=("zxPluginsInject.dylib" "${{ env.TWEAK_DEB }}")
+          tweaks=("zxPluginsInject.dylib" "$TWEAK_DEB")
           for file in resources/*.dylib; do
             if [[ "$file" != "resources/SwiftgramPro.dylib" ]]; then
               tweaks+=("$file")
             fi
           done
-          if [ "${{ inputs.display_name }}" = "Swiftgram" ]; then
+          if [ "$DISPLAY_NAME" = "Swiftgram" ]; then
             tweaks+=("resources/SwiftgramPro.dylib")
           fi
           for t in "${tweaks[@]}"; do
@@ -156,14 +228,18 @@ jobs:
               exit 1
             fi
           done
+          ipa_name="${DISPLAY_NAME}_${APP_VERSION}_${TWEAK_VERSION}.ipa"
           cyan -i telegram.ipa \
-            -o "${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.TWEAK_VERSION }}.ipa" \
+            -o "$ipa_name" \
             -f "${tweaks[@]}" \
-            -n "${{ inputs.display_name }}" \
-            -b "${{ steps.resolve.outputs.bundle_id }}"
+            -n "$DISPLAY_NAME" \
+            -b "$BUNDLE_ID"
+          echo "IPA_NAME=$ipa_name" >> "$GITHUB_ENV"
+
       - name: Create a Draft Release
         env:
           GH_TOKEN: ${{ github.token }}
+          DISPLAY_NAME: ${{ inputs.display_name }}
         run: |
           i=1
           while gh release view "tg-ipa${i}" --repo "$GITHUB_REPOSITORY" &>/dev/null; do
@@ -171,11 +247,16 @@ jobs:
           done
           gh release create "tg-ipa${i}" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.TWEAK_VERSION }}" \
+            --title "${DISPLAY_NAME}_${APP_VERSION}_${TWEAK_VERSION}" \
             --draft \
-            ${{ inputs.display_name }}_${{ env.APP_VERSION }}_${{ env.TWEAK_VERSION }}.ipa
-      - name: Job Summary - Build Complete
-        run: echo -e '### 🛠️ Build IPA Complete!' >> $GITHUB_STEP_SUMMARY
-      - name: Job Summary - Output the Draft Release Link
+            "$IPA_NAME"
+
+      - name: Job Summary
         run: |
-          echo -e "### 🚀 Draft Release\n\nDraft release has been created successfully! You can view your release here: https://github.com/${{ github.repository }}/releases" >> $GITHUB_STEP_SUMMARY
+          {
+            echo '### 🛠️ Build IPA Complete!'
+            echo
+            echo '### 🚀 Draft Release'
+            echo
+            echo "Draft release has been created successfully! You can view your release here: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases"
+          } >> "$GITHUB_STEP_SUMMARY"
