@@ -45,7 +45,7 @@ jobs:
     permissions:
       contents: write
     env:
-      SDK_VERSION: '18.6'
+      SDK_VERSION: '26.5'
       ZXPI_MIN_IOS: '14.0'
 
     steps:
@@ -185,7 +185,7 @@ jobs:
         if: steps.zx_cache.outputs.cache-hit != 'true' && steps.theos_cache.outputs.cache-hit != 'true'
         run: |
           sdk_repo="$RUNNER_TEMP/iOS-SDKs"
-          git clone --quiet --depth=1 -n --filter=tree:0 https://github.com/Tonwalter888/iOS-SDKs.git "$sdk_repo"
+          git clone --quiet --depth=1 -n --filter=tree:0 https://github.com/xybp888/iOS-SDKs.git "$sdk_repo"
           cd "$sdk_repo"
           git sparse-checkout set --no-cone "iPhoneOS${SDK_VERSION}.sdk"
           git checkout
